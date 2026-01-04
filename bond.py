@@ -88,6 +88,17 @@ st.markdown("""
     .corr-icon { font-size: 1.2rem; margin-right: 12px; width: 24px; text-align: center; }
     .corr-val { font-weight: 700; color: #f4f4f5; margin-right: 8px; min-width: 40px; }
     .corr-desc { font-size: 0.85rem; color: #a1a1aa; }
+    
+    .info-box {
+        background-color: rgba(30, 41, 59, 0.5);
+        border-left: 4px solid #60a5fa;
+        padding: 15px; margin-bottom: 15px; border-radius: 4px;
+        font-size: 0.95rem; line-height: 1.6;
+        color: #e4e4e7;
+    }
+    .info-header {
+        color: #93c5fd; font-weight: 700; font-size: 1.1rem; margin-bottom: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -241,7 +252,7 @@ def calculate_efficient_frontier(assets_selected, df_returns, max_single_alloc=1
     }
     return results
 
-# --- FIXED ENGINE: SAFE FOR DATE COMPARISON & ACCOUNTING MODE ---
+# --- FIXED ENGINE: SAFE FOR DATE COMPARISON & ACCOUNTING MODE & RAM PROTECTION ---
 def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound, assets_to_calculate, market_returns_df, simulation_mode, n_simulations):
     today = date.today()
     
@@ -365,15 +376,19 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
                     if simulation_mode == "Monte Carlo":
                         mu = np.mean(hist_series)
                         sigma = np.std(hist_series)
-                        chunk_size = 500000 
-                        sims_to_run_for_plot = chunk_size if n_simulations > chunk_size else n_simulations
-                        random_matrix = np.random.normal(mu, sigma, (len(df), sims_to_run_for_plot)).astype(np.float32)
+                        
+                        # FULL POWER (User Request): If they want 10M, we give 10M.
+                        # However, we trigger Garbage Collection to help RAM
+                        sims_to_run = n_simulations 
+                        
+                        random_matrix = np.random.normal(mu, sigma, (len(df), sims_to_run)).astype(np.float32)
                         cum_growth = np.cumprod(1.0 + random_matrix, axis=0)
                         final_values = cum_growth[-1, :]
                         median_idx = np.argsort(final_values)[len(final_values)//2]
                         returns_to_use = random_matrix[:, median_idx]
+                        
                         del random_matrix, cum_growth, final_values
-                        gc.collect()
+                        gc.collect() # Force RAM cleanup
                     else:
                         for i in range(len(df)):
                             hist_idx = i % len(hist_series)
@@ -572,13 +587,16 @@ with st.expander("⚙️ Pannello di Controllo", expanded=True):
             st.markdown("---")
             col_sim_1, col_sim_2 = st.columns([2, 1])
             with col_sim_1:
+                # DEFAULT SET TO 100.000 (Safe for Cloud)
                 sim_options = ["1.000", "5.000", "10.000", "50.000", "100.000", "500.000", "1.000.000", "5.000.000", "10.000.000"]
-                sim_choice = st.select_slider("Numero Scenari", options=sim_options, value="10.000.000")
+                sim_choice = st.select_slider("Numero Scenari", options=sim_options, value="100.000")
                 sim_map = {"1.000": 1000, "5.000": 5000, "10.000": 10000, "50.000": 50000, "100.000": 100000, "500.000": 500000, "1.000.000": 1000000, "5.000.000": 5000000, "10.000.000": 10000000}
                 n_sims = sim_map[sim_choice]
             with col_sim_2:
-                if n_sims >= 1000000: st.warning(f"⚠️ Modalità HPC Attiva.")
-                else: st.info("💡 Calcolo istantaneo.")
+                if n_sims >= 200000: 
+                    st.warning(f"⚠️ **Attenzione:** Selezionare più di 100.000 scenari potrebbe mandare in crash l'applicazione se eseguita su Cloud (limite RAM). Consigliato solo per esecuzione locale su PC potenti.")
+                else: 
+                    st.info("💡 Scenari ottimizzati per il Cloud.")
         st.markdown("---")
         c_bench, c_mix = st.columns([1, 2])
         with c_bench:
