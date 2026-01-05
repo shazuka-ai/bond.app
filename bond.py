@@ -89,15 +89,16 @@ st.markdown("""
     .corr-val { font-weight: 700; color: #f4f4f5; margin-right: 8px; min-width: 40px; }
     .corr-desc { font-size: 0.85rem; color: #a1a1aa; }
     
-    .info-box {
-        background-color: rgba(30, 41, 59, 0.5);
-        border-left: 4px solid #60a5fa;
-        padding: 15px; margin-bottom: 15px; border-radius: 4px;
-        font-size: 0.95rem; line-height: 1.6;
+    .tax-box {
+        background-color: rgba(16, 185, 129, 0.1); 
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 8px;
+        padding: 15px;
+        margin-top: 20px;
         color: #e4e4e7;
     }
-    .info-header {
-        color: #93c5fd; font-weight: 700; font-size: 1.1rem; margin-bottom: 5px;
+    .tax-title {
+        color: #34d399; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -125,8 +126,7 @@ def load_market_data(period_str):
     tickers_map = {v["ticker"]: k for k, v in ASSET_CONFIG.items()}
     tickers_list = list(tickers_map.keys())
     final_df = pd.DataFrame()
-    data_source = "Yahoo Finance (Live)"
-
+    
     # Fallback Data
     BACKUP_DATA = {
         "S&P 500 🇺🇸": [-0.06, -0.03, -0.01, 0.04, 0.01, -0.08, -0.01, 0.09, -0.09, -0.16, 0.05, 0.02, 0.03, 0.01, -0.01, 0.04],
@@ -191,7 +191,6 @@ def calculate_modified_var(returns_series, confidence_level=0.995):
     sigma = np.std(returns_series)
     s = skew(returns_series)
     k = kurtosis(returns_series)
-    
     alpha = 1 - confidence_level
     z_score = norm.ppf(alpha)
     z_mod = (z_score + (z_score**2 - 1) * s / 6 + (z_score**3 - 3 * z_score) * k / 24 - (2 * z_score**3 - 5 * z_score) * s**2 / 36)
@@ -252,12 +251,19 @@ def calculate_efficient_frontier(assets_selected, df_returns, max_single_alloc=1
     }
     return results
 
-# --- FIXED ENGINE: SAFE FOR DATE COMPARISON & ACCOUNTING MODE & RAM PROTECTION ---
-def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound, assets_to_calculate, market_returns_df, simulation_mode, n_simulations):
+# --- FIXED ENGINE: SAFE FOR DATE COMPARISON & TAX TRACKING ---
+# Modified to accept mix_weights to calculate WEIGHTED tax for Risk Assets
+def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound, assets_to_calculate, market_returns_df, simulation_mode, n_simulations, mix_weights=None):
     today = date.today()
     
     bonds = []
     max_maturity = today
+    
+    tax_log = {
+        'btp_coupons': 0.0,
+        'btp_gain': 0.0,
+        'asset_gain': 0.0
+    }
     
     # 1. Parse Input
     for index, row in bond_df.iterrows():
@@ -269,7 +275,6 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
             cash_invested = float(row['Capitale Investito (€)'])
             price = float(row['Prezzo'])
             
-            # Nominal is derived: (Cash / Price) * 100
             calculated_nominal = cash_invested / (price / 100)
             
             b = {
@@ -290,19 +295,17 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
             continue
             
     if not bonds:
-        return None, "Nessun BTP valido inserito.", 0, today
+        return None, "Nessun BTP valido inserito.", 0, today, tax_log
 
     total_cash_invested = sum([b['invested'] for b in bonds])
     
-    # FIX: Convert date to Timestamp for offset calculation
     ts_max_maturity = pd.Timestamp(max_maturity)
     final_date = ts_max_maturity + pd.offsets.MonthEnd(0)
     if final_date < ts_max_maturity: 
         final_date += pd.offsets.MonthEnd(1)
     
-    # FIX FREQUENCY: Use 'M' instead of 'ME' for max compatibility
     date_range = pd.date_range(start=today, end=final_date, freq='M') 
-    if len(date_range) == 0: return None, "Orizzonte troppo breve.", 0, today
+    if len(date_range) == 0: return None, "Orizzonte troppo breve.", 0, today, tax_log
     
     data = []
     
@@ -324,35 +327,36 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
             is_maturity_month = (d.year == b['maturity'].year and d.month == b['maturity'].month)
             
             if d_date < b['maturity'] and not is_maturity_month:
-                # HOLDING PHASE (Accounting: Value = Cost)
                 active_bond_value += b['invested']
                 
                 if d.month in b['coupon_months']:
-                    coup_net = (b['nominal'] * (b['coupon_pct']/100) * (1-tax_rate)) / 2
-                    monthly_cash_flow += coup_net
+                    gross_coup = (b['nominal'] * (b['coupon_pct']/100)) / 2
+                    tax_coup = gross_coup * tax_rate
+                    tax_log['btp_coupons'] += tax_coup
+                    monthly_cash_flow += (gross_coup - tax_coup)
             
             elif is_maturity_month:
-                # MATURITY PHASE (Payout)
                 gross_payout = b['nominal']
                 gain = b['nominal'] - b['invested']
+                
                 tax_on_gain = (gain * tax_rate) if gain > 0 else 0
+                tax_log['btp_gain'] += tax_on_gain
                 
                 net_payout = gross_payout - tax_on_gain
-                
                 liquid_cash += net_payout
                 monthly_capital_gain += (net_payout - b['invested']) 
                 paid_out_indices.add(i)
                 
-                # Final Coupon
                 if d.month in b['coupon_months']:
-                    coup_net = (b['nominal'] * (b['coupon_pct']/100) * (1-tax_rate)) / 2
-                    monthly_cash_flow += coup_net
+                    gross_coup = (b['nominal'] * (b['coupon_pct']/100)) / 2
+                    tax_coup = gross_coup * tax_rate
+                    tax_log['btp_coupons'] += tax_coup
+                    monthly_cash_flow += (gross_coup - tax_coup)
             else:
                 pass
         
         liquid_cash += monthly_cash_flow
         cum_coupons += monthly_cash_flow
-        
         total_val = active_bond_value + liquid_cash
         
         data.append({
@@ -371,24 +375,19 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
                 hist_series = market_returns_df[name].values
                 hist_series = hist_series[~np.isnan(hist_series)]
                 if len(hist_series) > 0:
-                    tax = ASSET_CONFIG[name]["tax"]
+                    asset_tax_rate = ASSET_CONFIG[name]["tax"]
                     returns_to_use = np.zeros(len(df))
                     if simulation_mode == "Monte Carlo":
                         mu = np.mean(hist_series)
                         sigma = np.std(hist_series)
-                        
-                        # FULL POWER (User Request): If they want 10M, we give 10M.
-                        # However, we trigger Garbage Collection to help RAM
-                        sims_to_run = n_simulations 
-                        
+                        sims_to_run = n_simulations
                         random_matrix = np.random.normal(mu, sigma, (len(df), sims_to_run)).astype(np.float32)
                         cum_growth = np.cumprod(1.0 + random_matrix, axis=0)
                         final_values = cum_growth[-1, :]
                         median_idx = np.argsort(final_values)[len(final_values)//2]
                         returns_to_use = random_matrix[:, median_idx]
-                        
                         del random_matrix, cum_growth, final_values
-                        gc.collect() # Force RAM cleanup
+                        gc.collect()
                     else:
                         for i in range(len(df)):
                             hist_idx = i % len(hist_series)
@@ -401,12 +400,25 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
                         new_val = prev_val * (1 + monthly_return)
                         gross_values.append(new_val)
                     gross_values = np.array(gross_values[1:])
+                    
+                    # --- WEIGHTED TAX LOGIC ---
+                    if mix_weights and name in mix_weights:
+                        weight_pct = mix_weights[name] / 100.0
+                        weighted_capital = total_cash_invested * weight_pct
+                        growth_factor = gross_values[-1] / total_cash_invested
+                        final_val_weighted = weighted_capital * growth_factor
+                        gain_weighted = final_val_weighted - weighted_capital
+                        
+                        if gain_weighted > 0:
+                            tax_log['asset_gain'] += (gain_weighted * asset_tax_rate)
+                            
+                    # Chart Data (Net)
                     gains = gross_values - total_cash_invested
-                    taxes = np.where(gains > 0, gains * tax, 0)
+                    taxes = np.where(gains > 0, gains * asset_tax_rate, 0)
                     net_values = gross_values - taxes
                     df[name] = net_values
 
-    return df, None, total_cash_invested, max_maturity
+    return df, None, total_cash_invested, max_maturity, tax_log
 
 def generate_monte_carlo_cone(mu, sigma, n_months, n_sims_preview=2000):
     dt = 1/12
@@ -450,6 +462,23 @@ def create_pdf_report(sim_data):
         
         pdf.multi_cell(0, 6, clean_text(f"Analisi di portafoglio obbligazionario (Bond Laddering) con capitale reale investito di EUR {cap:,.0f}. Orizzonte temporale massimo: {mat.strftime('%d/%m/%Y')}. Simulazione: {mode}."))
         pdf.ln(5)
+        
+        # TAX REPORT
+        tax_log = sim_data.get('tax_log', {})
+        if tax_log:
+            pdf.set_font("Arial", 'B', 11)
+            pdf.cell(0, 8, clean_text("Riepilogo Fiscale Stimato (Tax Report):"), ln=True)
+            pdf.set_font("Arial", '', 10)
+            
+            t_coup = tax_log.get('btp_coupons', 0)
+            t_gbtp = tax_log.get('btp_gain', 0)
+            t_gass = tax_log.get('asset_gain', 0)
+            
+            pdf.cell(0, 6, clean_text(f"- Tasse su Cedole BTP (12.5%): EUR {t_coup:,.2f}"), ln=True)
+            pdf.cell(0, 6, clean_text(f"- Tasse su Capital Gain BTP (12.5%): EUR {t_gbtp:,.2f}"), ln=True)
+            if t_gass > 0:
+                pdf.cell(0, 6, clean_text(f"- Tasse su Asset Risk (26%): EUR {t_gass:,.2f}"), ln=True)
+            pdf.ln(5)
         
         # BOND LIST
         if 'bond_df' in sim_data:
@@ -575,9 +604,107 @@ with st.expander("⚙️ Pannello di Controllo", expanded=True):
             st.metric("Capitale Iniziale", f"€ {total_cash_invested:,.0f}", help="Corrisponde alla somma della colonna 'Capitale Investito'.")
             capital = total_cash_invested
         with col2:
-            tax_rate = st.selectbox("Regime Fiscale", [0.125, 0.26], format_func=lambda x: "12.5% (Titoli di Stato)" if x==0.125 else "26% (Azioni/ETF)")
+            tax_rate = st.selectbox("Regime Fiscale (BTP)", [0.125, 0.26], format_func=lambda x: "12.5% (Titoli di Stato)" if x==0.125 else "26% (Azioni/ETF)")
         with col3:
             inflation = st.slider("Inflazione Stimata (%)", 0.0, 10.0, 2.0) / 100
+        
+        # --- NEW: TAX REPORT PLACEHOLDER ---
+        tax_report_placeholder = st.empty()
+        
+        if 'sim_results' in st.session_state:
+            res = st.session_state.sim_results
+            tax_log = res.get('tax_log', {})
+            total_tax = tax_log.get('btp_coupons', 0) + tax_log.get('btp_gain', 0) + tax_log.get('asset_gain', 0)
+            
+            with tax_report_placeholder.container():
+                st.markdown("---")
+                st.subheader("📊 Report Fiscale Stimato")
+                tc1, tc2, tc3 = st.columns(3)
+                with tc1:
+                    st.markdown(f"""<div class="tax-box"><div class="tax-title">Totale Imposte</div><span style="font-size:1.6rem; font-weight:bold; color:#f87171">€ {total_tax:,.2f}</span></div>""", unsafe_allow_html=True)
+                with tc2:
+                    st.markdown(f"""<div style="font-size:0.95rem; margin-top:20px; line-height:1.8;">
+                    📉 Ritenuta Cedole (12.5%): <b>€ {tax_log.get('btp_coupons', 0):,.2f}</b><br>
+                    📉 Gain BTP (12.5%): <b>€ {tax_log.get('btp_gain', 0):,.2f}</b>
+                    </div>""", unsafe_allow_html=True)
+                with tc3:
+                    st.markdown(f"""<div style="font-size:0.95rem; margin-top:20px; line-height:1.8;">
+                    📉 Gain Azioni (26%): <b>€ {tax_log.get('asset_gain', 0):,.2f}</b><br>
+                    <span style="color:#a1a1aa; font-size:0.8rem">Calcolato solo sulla quota profitto.</span>
+                    </div>""", unsafe_allow_html=True)
+                
+                # --- NEW CHART: GROSS VS NET CURVE (Tax Visualizer) ---
+                df_chart = res['df'].copy()
+                
+                # 1. Tax Cumulative BTP
+                df_chart['Cum_Tax_Coupons'] = (df_chart['Cum_Coupons'] / (1-tax_rate)) - df_chart['Cum_Coupons']
+                df_chart['Monthly_Tax_Gain_BTP'] = (df_chart['Gain_Netto_Finale'] / (1-tax_rate)) - df_chart['Gain_Netto_Finale']
+                df_chart['Cum_Tax_Gain_BTP'] = df_chart['Monthly_Tax_Gain_BTP'].cumsum()
+                
+                # BTP Tax Total Curve
+                # Note: df['BTP_Value'] is already NET. We assume it contains 100% of allocation if BTPs are present.
+                # If we have a mix, we must weigh this tax curve.
+                
+                # WEIGHT LOGIC
+                total_risk_tax_series = pd.Series(0.0, index=df_chart.index)
+                
+                # How much of the total portfolio is BTP?
+                btp_weight_factor = res['btp_w_final'] / 100.0
+                # Scale the BTP tax curve by the BTP weight
+                btp_tax_curve = (df_chart['Cum_Tax_Coupons'] + df_chart['Cum_Tax_Gain_BTP']) * btp_weight_factor
+                
+                # 2. Reconstruct Risk Asset Tax (Cumulative)
+                if res.get('has_mix'):
+                    mix_weights = res['mix_details']
+                    # Total risk weight is (100 - btp_weight). 
+                    # Weights in mix_weights are relative to Total Portfolio? No, usually relative to Risk Part?
+                    # Let's check inputs: User inputs "20" for SP500. Logic: "total_risk_weight += w".
+                    # So mix_weights[asset] IS the % of Total Portfolio.
+                    
+                    risk_total_pct = sum(mix_weights.values()) # e.g. 20
+                    
+                    for asset, weight in mix_weights.items():
+                        if asset in df_chart.columns:
+                            # Reconstruct Gross for this specific asset line
+                            # df[asset] is the NET line for 100% allocation.
+                            asset_net_series = df_chart[asset]
+                            initial_val = asset_net_series.iloc[0]
+                            net_gain = asset_net_series - initial_val
+                            
+                            # Reverse Tax on this 100% line
+                            # Tax = NetGain / (1-0.26) * 0.26
+                            # Only if positive
+                            asset_tax_100 = net_gain.apply(lambda x: (x / (1 - 0.26)) * 0.26 if x > 0 else 0)
+                            
+                            # Now scale this tax by the actual weight in portfolio (e.g. 0.20)
+                            weight_factor = weight / 100.0
+                            weighted_asset_tax = asset_tax_100 * weight_factor
+                            
+                            total_risk_tax_series += weighted_asset_tax
+                            
+                # TOTAL TAX WEDGE
+                total_tax_wedge = btp_tax_curve + total_risk_tax_series
+                
+                # Identify Net Curve
+                net_curve_col = "Mix_Portfolio" if "Mix_Portfolio" in df_chart.columns else "BTP_Value"
+                net_curve = df_chart[net_curve_col]
+                
+                gross_curve = net_curve + total_tax_wedge
+                
+                fig_tax = go.Figure()
+                fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=gross_curve, mode='lines', name='Capitale Lordo (No Tasse)', line=dict(color='#f87171', width=2, dash='dash')))
+                fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=net_curve, mode='lines', name='Capitale Netto (Reale)', line=dict(color='#34d399', width=2), fill='tonexty', fillcolor='rgba(248, 113, 113, 0.2)'))
+                
+                fig_tax.update_layout(
+                    title="Impatto Fiscale: Lordo vs Netto",
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#e4e4e7'), height=300,
+                    xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ "),
+                    hovermode="x unified", margin=dict(t=30, b=0, l=0, r=0)
+                )
+                
+                st.plotly_chart(fig_tax, use_container_width=True)
+
 
     with tab_strategy:
         sim_mode = st.radio("Metodo Simulazione", ["Historical Replay", "Monte Carlo"], horizontal=True, index=1)
@@ -730,11 +857,11 @@ with st.expander("⚙️ Pannello di Controllo", expanded=True):
 # --- EXECUTION & VISUALIZATION ---
 if run_calc:
     all_assets = list(set(selected_benchmarks + mix_assets_selected))
-    df, err, init_spent, calc_maturity = calculate_engine_multibond(bond_df, capital, tax_rate, compound, all_assets, market_returns, sim_mode, n_sims)
+    df, err, init_spent, calc_maturity, tax_log_res = calculate_engine_multibond(bond_df, capital, tax_rate, compound, all_assets, market_returns, sim_mode, n_sims, mix_weights if mix_assets_selected else None)
     
     if err: st.error(err)
     else:
-        if valid_mix and mix_assets_selected:
+        if mix_assets_selected:
             risk_total_w = sum(mix_weights.values())
             target_weights = {a: (w/risk_total_w) for a, w in mix_weights.items()} 
             risk_capital_ratio = (100 - btp_weight) / 100.0
@@ -754,7 +881,6 @@ if run_calc:
                 sub_accounts = {}
                 sub_accounts["BTP"] = current_val * btp_capital_ratio
                 for asset in mix_assets_selected: sub_accounts[asset] = current_val * risk_capital_ratio * target_weights[asset]
-                dates = df["Date"].tolist()
                 for i in range(1, len(df)):
                     r_btp = btp_ret.iloc[i]
                     sub_accounts["BTP"] *= (1 + r_btp)
@@ -769,7 +895,66 @@ if run_calc:
                     mix_values.append(total_nav)
                 df["Mix_Portfolio"] = mix_values
 
-        st.session_state.sim_results = {'df': df, 'init_spent': init_spent, 'maturity_date': calc_maturity, 'selected_benchmarks': selected_benchmarks, 'inflation': inflation, 'has_mix': valid_mix, 'mix_details': mix_weights if valid_mix else {}, 'btp_w_final': btp_weight if valid_mix else 100, 'sim_mode': sim_mode, 'n_sims': n_sims, 'data_period': data_period_option, 'bond_df': bond_df}
+        st.session_state.sim_results = {'df': df, 'init_spent': init_spent, 'maturity_date': calc_maturity, 'selected_benchmarks': selected_benchmarks, 'inflation': inflation, 'has_mix': bool(mix_assets_selected), 'mix_details': mix_weights if mix_assets_selected else {}, 'btp_w_final': btp_weight if mix_assets_selected else 100, 'sim_mode': sim_mode, 'n_sims': n_sims, 'data_period': data_period_option, 'bond_df': bond_df, 'tax_log': tax_log_res}
+        
+        # --- PLACEHOLDER UPDATE (No Rerun) ---
+        tax_log = tax_log_res
+        total_tax = tax_log.get('btp_coupons', 0) + tax_log.get('btp_gain', 0) + tax_log.get('asset_gain', 0)
+        
+        with tax_report_placeholder.container():
+            st.markdown("---")
+            st.subheader("📊 Report Fiscale Stimato")
+            tc1, tc2, tc3 = st.columns(3)
+            with tc1:
+                st.markdown(f"""<div class="tax-box"><div class="tax-title">Totale Imposte</div><span style="font-size:1.6rem; font-weight:bold; color:#f87171">€ {total_tax:,.2f}</span></div>""", unsafe_allow_html=True)
+            with tc2:
+                st.markdown(f"""<div style="font-size:0.95rem; margin-top:20px; line-height:1.8;">
+                📉 Ritenuta Cedole (12.5%): <b>€ {tax_log.get('btp_coupons', 0):,.2f}</b><br>
+                📉 Gain BTP (12.5%): <b>€ {tax_log.get('btp_gain', 0):,.2f}</b>
+                </div>""", unsafe_allow_html=True)
+            with tc3:
+                st.markdown(f"""<div style="font-size:0.95rem; margin-top:20px; line-height:1.8;">
+                📉 Gain Azioni (26%): <b>€ {tax_log.get('asset_gain', 0):,.2f}</b><br>
+                <span style="color:#a1a1aa; font-size:0.8rem">Calcolato solo sulla quota profitto.</span>
+                </div>""", unsafe_allow_html=True)
+            
+            # --- NEW CHART: GROSS VS NET CURVE (Tax Visualizer) ---
+            df_chart = df.copy()
+            # 1. Tax Cumulative BTP
+            df_chart['Cum_Tax_Coupons'] = (df_chart['Cum_Coupons'] / (1-tax_rate)) - df_chart['Cum_Coupons']
+            df_chart['Monthly_Tax_Gain_BTP'] = (df_chart['Gain_Netto_Finale'] / (1-tax_rate)) - df_chart['Gain_Netto_Finale']
+            df_chart['Cum_Tax_Gain_BTP'] = df_chart['Monthly_Tax_Gain_BTP'].cumsum()
+            
+            # BTP Tax Total Curve scaled
+            btp_weight_factor = (100 - total_risk_weight)/100.0 if mix_assets_selected else 1.0
+            btp_tax_curve = (df_chart['Cum_Tax_Coupons'] + df_chart['Cum_Tax_Gain_BTP']) * btp_weight_factor
+            
+            # 2. Risk Asset Tax
+            total_risk_tax_series = pd.Series(0.0, index=df_chart.index)
+            if mix_assets_selected:
+                for asset, weight in mix_weights.items():
+                    if asset in df_chart.columns:
+                        asset_net_series = df_chart[asset]
+                        initial_val = asset_net_series.iloc[0]
+                        net_gain = asset_net_series - initial_val
+                        # Reverse Tax
+                        asset_tax_100 = net_gain.apply(lambda x: (x / (1 - 0.26)) * 0.26 if x > 0 else 0)
+                        # Scale by weight
+                        weighted_asset_tax = asset_tax_100 * (weight / 100.0)
+                        total_risk_tax_series += weighted_asset_tax
+                        
+            total_tax_wedge = btp_tax_curve + total_risk_tax_series
+            
+            net_curve_col = "Mix_Portfolio" if "Mix_Portfolio" in df_chart.columns else "BTP_Value"
+            net_curve = df_chart[net_curve_col]
+            gross_curve = net_curve + total_tax_wedge
+            
+            fig_tax = go.Figure()
+            fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=gross_curve, mode='lines', name='Capitale Lordo (No Tasse)', line=dict(color='#f87171', width=2, dash='dash')))
+            fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=net_curve, mode='lines', name='Capitale Netto (Reale)', line=dict(color='#34d399', width=2), fill='tonexty', fillcolor='rgba(248, 113, 113, 0.2)'))
+            
+            fig_tax.update_layout(title="Impatto Fiscale: Lordo vs Netto", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=300, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ "), hovermode="x unified", margin=dict(t=30, b=0, l=0, r=0))
+            st.plotly_chart(fig_tax, use_container_width=True)
 
 if 'sim_results' in st.session_state:
     res = st.session_state.sim_results
@@ -791,7 +976,6 @@ if 'sim_results' in st.session_state:
     btp_monthly_pure = last["Cum_Coupons"] / months
     btp_capital_gain = last["Gain_Netto_Finale"]
     
-    # SIDEBAR REPORT BUTTON
     with st.sidebar:
         st.header("📄 Report")
         if st.button("Scarica Report PDF Completo"):
@@ -872,25 +1056,3 @@ if 'sim_results' in st.session_state:
     with st.expander("📄 Dati Annuali Dettagliati"):
         annual = df.groupby('Anno').last().reset_index()
         st.dataframe(annual, use_container_width=True)
-
-# Final conditional message (Footer logic)
-if not run_calc and 'sim_results' not in st.session_state:
-    st.info("👈 Configura i parametri sopra e clicca su AVVIA SIMULAZIONE per iniziare.")
-    
-# Download button logic at the very end
-sim_data_for_pdf = st.session_state.get('sim_results', None)
-st.markdown("---")
-col_down_1, col_down_2 = st.columns([3, 1])
-with col_down_2:
-    try:
-        # Always allow downloading the manual, even if sim_data_for_pdf is None
-        pdf_bytes = create_pdf_report(sim_data_for_pdf)
-        st.download_button(
-            label="📄 Scarica Whitepaper Tecnico", 
-            data=pdf_bytes, 
-            file_name="report_finanziario_pro.pdf", 
-            mime="application/pdf",
-            help="Scarica un report PDF dettagliato con la metodologia e i risultati della tua simulazione."
-        )
-    except Exception as e:
-        st.error(f"Errore generazione PDF: {e}")
