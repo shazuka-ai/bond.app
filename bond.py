@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
 from datetime import date, datetime, timedelta
 import math
 import time
@@ -20,95 +21,127 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. CSS: DESIGN MODERNO ---
+# --- 2. CSS: DESIGN PERFEZIONATO ---
 st.markdown("""
 <style>
     .stApp {
-        background-color: #09090b;
-        background-image: radial-gradient(circle at 50% 0%, #1c1917 0%, #09090b 80%);
-        font-family: 'Inter', sans-serif;
+        background-color: #0e0e11; 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    h1, h2, h3, h4 { color: #f4f4f5; font-weight: 600; }
+    h1, h2, h3, h4 { color: #f4f4f5; font-weight: 600; letter-spacing: -0.5px; }
     
-    div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 12px; padding: 15px;
+    /* INPUT WIDGETS STANDARD */
+    .stTextInput > div > div > input, 
+    .stNumberInput > div > div > input, 
+    .stDateInput > div > div > input, 
+    .stSelectbox > div > div > div {
+        background-color: #18181b !important; 
+        color: #fff !important;
+        border: 1px solid #27272a !important; 
+        border-radius: 8px !important;
+        height: 42px;
     }
-    div[data-testid="stMetricValue"] { color: #fafafa; font-size: 26px; font-weight: 700; }
-    
-    .metric-detail {
-        font-size: 0.85rem; color: #9ca3af; margin-top: 5px; padding-top: 5px;
-        border-top: 1px solid rgba(255,255,255,0.1); line-height: 1.4;
-    }
-    .metric-highlight { color: #34d399; font-weight: 600; }
-    .metric-purple { color: #c084fc; font-weight: 600; }
-    .metric-danger { color: #f87171; font-weight: 600; }
-    .metric-gold { color: #fbbf24; font-weight: 600; }
-    
-    .stTextInput > div > div > input, .stNumberInput > div > div > input, .stDateInput > div > div > input, .stSelectbox > div > div > div {
-        background-color: #18181b !important; color: #e4e4e7 !important;
-        border: 1px solid #3f3f46 !important; border-radius: 8px !important;
-    }
-    
     .stMultiSelect > div > div > div {
-        background-color: #18181b; color: #e4e4e7;
+        background-color: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 8px;
+    }
+
+    /* --- HERO CARDS (INPUTS) --- */
+    .prof-card {
+        background-color: #131316;
+        border: 1px solid #27272a;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 10px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+    .accent-green { border-top: 3px solid #10b981; }
+    .accent-purple { border-top: 3px solid #8b5cf6; }
+    
+    .card-label {
+        font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 5px; display: block; text-align: center;
+    }
+    .text-green { color: #34d399; }
+    .text-purple { color: #a78bfa; }
+    
+    /* INPUT HERO CUSTOMIZATION (FONT SIZE FIX) */
+    div[data-testid="stNumberInput"] input {
+        border: none !important;
+        background: transparent !important;
+        font-size: 1.3rem !important; 
+        font-weight: 700 !important;
+        color: white !important;
+        text-align: center !important;
+        padding: 0 !important;
+    }
+    div[data-testid="stNumberInput"] button { display: none; } 
+
+    /* --- SUMMARY DASHBOARD (RESULT) --- */
+    .dash-container {
+        background: linear-gradient(145deg, #1e293b, #0f172a);
+        border: 1px solid #334155;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 25px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        color: white;
+    }
+    .dash-header-row { display: flex; justify-content: center; align-items: center; margin-bottom: 10px; }
+    .dash-label { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+    .dash-value { font-size: 2.5rem; font-weight: 800; color: #fff; text-align: center; margin-bottom: 15px; }
+    
+    /* PROGRESS BAR CONTAINER */
+    .progress-track {
+        width: 100%; 
+        height: 16px; 
+        background-color: #334155; 
+        border-radius: 8px; 
+        overflow: hidden; 
+        display: flex;
+    }
+    
+    /* LEGEND CONTAINER */
+    .dash-legend-flex {
+        display: flex; 
+        flex-wrap: wrap; 
+        justify-content: center; 
+        gap: 15px; 
+        margin-top: 15px; 
+        font-size: 0.9rem; 
+        font-weight: 500; 
+        color: #d4d4d8;
+    }
+    .leg-item-flex { display: flex; align-items: center; gap: 6px; }
+
+    /* --- METRICS (ROUNDED STYLE RESTORED) --- */
+    div[data-testid="stMetric"] {
+        background-color: #18181b;
+        border: 1px solid #27272a;
+        border-radius: 16px !important; 
+        padding: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    div[data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 700 !important; }
+    
+    div[data-testid="stMetricDelta"] {
+        background-color: rgba(34, 197, 94, 0.15);
+        border-radius: 6px;
+        padding: 2px 8px;
+        width: fit-content;
+        margin-top: 4px;
+    }
+
+    /* UTILS */
+    .step-header {
+        font-size: 1.1rem; font-weight: 700; color: #f4f4f5; margin-top: 25px; margin-bottom: 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;
     }
     
     .stButton > button {
-        width: 100%; background-color: #2563eb; color: white; border: none;
-        padding: 12px; font-size: 16px; font-weight: 600; border-radius: 8px; margin-top: 10px;
+        width: 100%; background-color: #2563eb; color: white; border: none; padding: 12px; 
+        font-size: 16px; font-weight: 600; border-radius: 8px; margin-top: 15px;
+        transition: transform 0.1s;
     }
-    .stButton > button:hover { background-color: #1d4ed8; }
-    
-    .risk-table {
-        width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem;
-    }
-    .risk-table td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    .risk-table th { text-align: left; color: #a1a1aa; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.2); }
-
-    .corr-legend {
-        background-color: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.05);
-        border-radius: 12px;
-        padding: 15px;
-        margin-top: 15px;
-    }
-    .corr-item {
-        display: flex; align-items: center; margin-bottom: 8px; font-family: 'Inter', sans-serif;
-    }
-    .corr-icon { font-size: 1.2rem; margin-right: 12px; width: 24px; text-align: center; }
-    .corr-val { font-weight: 700; color: #f4f4f5; margin-right: 8px; min-width: 40px; }
-    .corr-desc { font-size: 0.85rem; color: #a1a1aa; }
-    
-    .tax-box {
-        background-color: rgba(16, 185, 129, 0.1); 
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        border-radius: 8px;
-        padding: 15px;
-        margin-top: 20px;
-        color: #e4e4e7;
-    }
-    .tax-title {
-        color: #34d399; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px;
-    }
-    
-    .highlight-box {
-        background-color: rgba(99, 102, 241, 0.1);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        border-left: 4px solid #6366f1;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        margin-top: 10px;
-    }
-    .highlight-title {
-        color: #818cf8; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px; display: flex; align-items: center;
-    }
-    
-    .step-header {
-        font-size: 1.3rem; font-weight: 700; color: #f4f4f5; margin-top: 20px; margin-bottom: 10px;
-        border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;
-    }
+    .stButton > button:hover { background-color: #1d4ed8; transform: scale(1.01); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -582,51 +615,28 @@ if not st.session_state.simulation_done:
             st.session_state.current_period = data_period_option
             market_returns, _ = load_market_data(data_period_option)
 
-    # --- 1. CORE PORTFOLIO (BTP) ---
-    st.markdown('<div class="step-header">1. Core: Obbligazioni (BTP)</div>', unsafe_allow_html=True)
+    # --- 1. CONFIGURAZIONE CAPITALE & ASSET ALLOCATION (HERO SECTION) ---
+    st.markdown('<div class="step-header">1. Definizione Budget e Asset Allocation</div>', unsafe_allow_html=True)
     
-    default_bonds = pd.DataFrame([
-        {"Nome/ISIN": "IT0005425233", "Scadenza": date(2051, 9, 1), "Cedola %": 1.70, "Prezzo": 59.75, "Capitale Investito (€)": 25000.0},
-        {"Nome/ISIN": "IT0005441883", "Scadenza": date(2072, 3, 1), "Cedola %": 2.15, "Prezzo": 58.32, "Capitale Investito (€)": 25000.0}
-    ])
+    c_in_1, c_in_2 = st.columns([1, 1.2]) 
     
-    with st.expander("ℹ️ Guida alla modifica"):
-        st.markdown("Puoi modificare le celle direttamente cliccandoci sopra. Per aggiungere un BTP usa il tasto **+** in basso a destra della tabella. Per eliminarne uno, seleziona la riga e premi cancella sulla tastiera.")
+    with c_in_1:
+        # VISUALLY INTEGRATED CONTAINER FOR CAPITAL (PRO BOX)
+        st.markdown('<div class="prof-card accent-green"><span class="card-label text-green">💰 Capitale Totale (€)</span>', unsafe_allow_html=True)
+        total_budget_input = st.number_input("Capitale", min_value=1000.0, step=1000.0, value=50000.0, format="%.2f", label_visibility="collapsed")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    bond_df = st.data_editor(
-        default_bonds,
-        num_rows="dynamic",
-        column_config={
-            "Scadenza": st.column_config.DateColumn("Scadenza", format="DD/MM/YYYY"),
-            "Cedola %": st.column_config.NumberColumn("Cedola %", min_value=0.0, max_value=15.0, step=0.05, format="%.2f%%"),
-            "Prezzo": st.column_config.NumberColumn("Prezzo Acquisto", min_value=0.0, max_value=200.0, step=0.01, format="%.2f"),
-            "Capitale Investito (€)": st.column_config.NumberColumn("Capitale Investito (Cash)", min_value=1000.0, step=1000.0, format="€ %.2f")
-        },
-        use_container_width=True
-    )
+    with c_in_2:
+        # VISUALLY INTEGRATED CONTAINER FOR MIX (PRO BOX)
+        st.markdown('<div class="prof-card accent-purple"><span class="card-label text-purple">🚀 Portafoglio Misto</span>', unsafe_allow_html=True)
+        mix_assets_selected = st.multiselect("Asset Satellite", list(ASSET_CONFIG.keys()), placeholder="Seleziona asset...", label_visibility="collapsed")
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    total_cash_invested = bond_df["Capitale Investito (€)"].sum()
-    implied_nominal = (bond_df["Capitale Investito (€)"] / (bond_df["Prezzo"] / 100)).sum()
-    
-    c_k1, c_k2, c_k3 = st.columns(3)
-    with c_k1:
-        st.markdown(f"**Capitale Reale Speso (Oggi):** :green[€ {total_cash_invested:,.0f}]")
-    with c_k2:
-        st.markdown(f"**Valore Nominale a Scadenza:** € {implied_nominal:,.0f}")
-    with c_k3:
-        compound = st.toggle("Reinvesti Cedole (Interesse Composto)", value=False, help="Se attivo, le cedole non vengono incassate ma reinvestite automaticamente allo stesso tasso, generando interesse su interesse.")
-
-    # --- 2. SATELLITE (RISK ASSETS) ---
-    st.markdown('<div class="step-header">2. Satellite: Asset di Rischio (Mix)</div>', unsafe_allow_html=True)
-    
-    st.markdown("""<div class="highlight-box">
-    <div class="highlight-title">🚀 Portafoglio Misto (Boost Rendimento)</div>
-    <span style="font-size: 0.9em; color: #a1a1aa;">Aggiungi qui Azioni, Oro o Bitcoin per diversificare e potenziare il rendimento del tuo portafoglio BTP. Attenzione: aumenta la volatilità.</span>
-    </div>""", unsafe_allow_html=True)
-    
-    mix_assets_selected = st.multiselect("Seleziona Asset Satellite:", list(ASSET_CONFIG.keys()), placeholder="Es. S&P 500, Oro...", label_visibility="collapsed")
+    # PERCENTAGE INPUTS
     mix_weights = {}
     total_risk_weight = 0
+    valid_mix = True
+    btp_weight = 100.0
     
     if mix_assets_selected:
         cols_mix = st.columns(len(mix_assets_selected))
@@ -634,7 +644,8 @@ if not st.session_state.simulation_done:
             with cols_mix[idx]:
                 k = f"w_{asset}"
                 if k not in st.session_state: st.session_state[k] = 20.0 
-                w = st.number_input(f"% {asset.split()[0]}", 0.0, 100.0, step=0.5, format="%.1f", key=k, help="Percentuale del portafoglio totale da allocare a questo asset.")
+                st.markdown(f"<div style='text-align:center; font-weight:bold; color:#a78bfa; margin-bottom:5px;'>% {asset.split()[0]}</div>", unsafe_allow_html=True)
+                w = st.number_input(f"Peso {asset}", 0.0, 100.0, step=0.5, format="%.1f", key=k, label_visibility="collapsed")
                 mix_weights[asset] = w
                 total_risk_weight += w
         
@@ -645,9 +656,54 @@ if not st.session_state.simulation_done:
         else:
             st.info(f"📊 Allocazione Finale: {btp_weight:.1f}% BTP Sicuri + {total_risk_weight:.1f}% Asset Rischiosi")
             valid_mix = True
-    else:
-        btp_weight = 100
-        valid_mix = False
+
+    # --- 2. CORE PORTFOLIO (BTP) ---
+    st.markdown('<div class="step-header">2. Dettaglio BTP (Core)</div>', unsafe_allow_html=True)
+    
+    # PRE-FILTER: ASK FOR NUMBER OF BTPs
+    num_btp = st.number_input("Numero di BTP nel portafoglio:", min_value=1, max_value=10, value=2, step=1)
+    
+    # AUTO-DISTRIBUTION LOGIC
+    btp_capital_available = total_budget_input * (btp_weight / 100.0)
+    capital_per_bond = btp_capital_available / num_btp if num_btp > 0 else 0
+    
+    # Generate INIT data based on num_btp
+    bonds_init_data = []
+    # Example logic: Repeat the 2 defaults cycling if > 2, or just use defaults
+    defaults = [
+        {"Nome/ISIN": "IT0005425233", "Scadenza": date(2051, 9, 1), "Cedola %": 1.70, "Prezzo": 59.75},
+        {"Nome/ISIN": "IT0005441883", "Scadenza": date(2072, 3, 1), "Cedola %": 2.15, "Prezzo": 58.32}
+    ]
+    
+    for i in range(num_btp):
+        ref = defaults[i % 2]
+        b = ref.copy()
+        b["Capitale Investito (€)"] = capital_per_bond
+        bonds_init_data.append(b)
+
+    bond_df = st.data_editor(
+        pd.DataFrame(bonds_init_data),
+        num_rows="fixed", # FIXED ROWS TO PREVENT ADD/DELETE CONFLICTS
+        column_config={
+            "Scadenza": st.column_config.DateColumn("Scadenza", format="DD/MM/YYYY"),
+            "Cedola %": st.column_config.NumberColumn("Cedola %", min_value=0.0, max_value=15.0, step=0.05, format="%.2f%%"),
+            "Prezzo": st.column_config.NumberColumn("Prezzo Acquisto", min_value=0.0, max_value=200.0, step=0.01, format="%.2f"),
+            "Capitale Investito (€)": st.column_config.NumberColumn("Capitale Investito (Cash)", min_value=0.0, step=1000.0, format="€ %.2f")
+        },
+        use_container_width=True,
+        key=f"editor_{total_budget_input}_{btp_weight}_{num_btp}"
+    )
+    
+    current_btp_sum = bond_df["Capitale Investito (€)"].sum()
+    implied_nominal = (bond_df["Capitale Investito (€)"] / (bond_df["Prezzo"] / 100)).sum()
+    
+    c_k1, c_k2, c_k3 = st.columns(3)
+    with c_k1:
+        st.markdown(f"**Capitale BTP Effettivo:** :green[€ {current_btp_sum:,.0f}]")
+    with c_k2:
+        st.markdown(f"**Valore Nominale a Scadenza:** € {implied_nominal:,.0f}")
+    with c_k3:
+        compound = st.toggle("Reinvesti Cedole (Interesse Composto)", value=False, help="Se attivo, le cedole non vengono incassate ma reinvestite automaticamente allo stesso tasso, generando interesse su interesse.")
 
     # --- 3. PARAMETRI ECONOMICI ---
     st.markdown('<div class="step-header">3. Fisco & Inflazione</div>', unsafe_allow_html=True)
@@ -684,68 +740,112 @@ if not st.session_state.simulation_done:
         st.caption("Configura qui i benchmark di confronto e le finestre di analisi statistica.")
         c_a1, c_a2 = st.columns(2)
         with c_a1:
-            # DEFAULT IS NOW EMPTY LIST [] AS REQUESTED
             selected_benchmarks = st.multiselect("Confronta con (Benchmark):", list(ASSET_CONFIG.keys()), default=[], help="Scegli uno o più indici di mercato per visualizzare la loro linea di andamento sul grafico finale insieme al tuo portafoglio.")
         with c_a2:
             window_months = st.select_slider("Rolling Window (Mesi)", options=[12, 24, 36, 60, 120], value=36, help="Definisce l'ampiezza della finestra temporale per il calcolo delle statistiche mobili (es. volatilità a 3 anni).")
 
     # --- RUN BUTTON ---
-    capital = total_cash_invested # Use calculated total
     st.markdown("---")
     
     # DEFINE PLACEHOLDER ALWAYS TO AVOID NAME ERROR
     tax_report_placeholder = st.empty()
     
     if st.button("🚀 AVVIA SIMULAZIONE COMPLETA", type="primary", use_container_width=True):
-        # PERFORM CALCULATION
-        all_assets = list(set(selected_benchmarks + (mix_assets_selected if mix_assets_selected else [])))
-        df, err, init_spent, calc_maturity, tax_log_res = calculate_engine_multibond(bond_df, capital, tax_rate, compound, all_assets, market_returns, sim_mode, n_sims, mix_weights if mix_assets_selected else None)
-        
-        if err:
-            st.error(err)
+        if not valid_mix:
+            st.error("Correggi l'allocazione del portafoglio (Totale > 100%) prima di avviare.")
         else:
-            df['Anno'] = df['Date'].dt.year
+            # FIX: RECALCULATE BTP TOTAL FROM TABLE JUST IN CASE
+            final_btp_sum = bond_df["Capitale Investito (€)"].sum()
             
-            # Post-process mix
-            if mix_assets_selected:
-                risk_total_w = sum(mix_weights.values())
-                target_weights = {a: (w/risk_total_w) for a, w in mix_weights.items()} 
-                risk_capital_ratio = (100 - btp_weight) / 100.0
-                btp_capital_ratio = btp_weight / 100.0
-                if not rebalance:
-                    df["Mix_Portfolio"] = df["BTP_Value"] * btp_capital_ratio
-                    for asset, w_norm in target_weights.items():
-                        if asset in df.columns:
-                            quota = risk_capital_ratio * w_norm
-                            df["Mix_Portfolio"] += df[asset] * quota
-                else:
-                    df_r = df
-                    btp_ret = df_r["BTP_Value"].pct_change().fillna(0)
-                    asset_rets = pd.DataFrame()
-                    for asset in mix_assets_selected: asset_rets[asset] = df_r[asset].pct_change().fillna(0)
-                    mix_values = [init_spent]
-                    current_val = init_spent
-                    sub_accounts = {}
-                    sub_accounts["BTP"] = current_val * btp_capital_ratio
-                    for asset in mix_assets_selected: sub_accounts[asset] = current_val * risk_capital_ratio * target_weights[asset]
-                    for i in range(1, len(df_r)):
-                        r_btp = btp_ret.iloc[i]
-                        sub_accounts["BTP"] *= (1 + r_btp)
-                        for asset in mix_assets_selected:
-                            r_ass = asset_rets[asset].iloc[i]
-                            sub_accounts[asset] *= (1 + r_ass)
-                        total_nav = sub_accounts["BTP"] + sum(sub_accounts[a] for a in mix_assets_selected)
-                        curr_btp_w = sub_accounts["BTP"] / total_nav
-                        if abs(curr_btp_w - btp_capital_ratio) > 0.05:
-                            sub_accounts["BTP"] = total_nav * btp_capital_ratio
-                            for asset in mix_assets_selected: sub_accounts[asset] = total_nav * risk_capital_ratio * target_weights[asset]
-                        mix_values.append(total_nav)
-                    df["Mix_Portfolio"] = mix_values
+            # PERFORM CALCULATION
+            all_assets = list(set(selected_benchmarks + (mix_assets_selected if mix_assets_selected else [])))
+            df, err, init_spent, calc_maturity, tax_log_res = calculate_engine_multibond(bond_df, final_btp_sum, tax_rate, compound, all_assets, market_returns, sim_mode, n_sims, mix_weights if mix_assets_selected else None)
+            
+            if err:
+                st.error(err)
+            else:
+                df['Anno'] = df['Date'].dt.year
+                
+                # Post-process mix
+                if mix_assets_selected:
+                    risk_total_w = sum(mix_weights.values())
+                    target_weights = {a: (w/risk_total_w) for a, w in mix_weights.items()} 
+                    risk_capital_ratio = (100 - btp_weight) / 100.0
+                    btp_capital_ratio = btp_weight / 100.0
+                    if not rebalance:
+                        df["Mix_Portfolio"] = df["BTP_Value"] * btp_capital_ratio
+                        for asset, w_norm in target_weights.items():
+                            if asset in df.columns:
+                                quota = risk_capital_ratio * w_norm
+                                df["Mix_Portfolio"] += df[asset] * quota
+                    else:
+                        df_r = df
+                        btp_ret = df_r["BTP_Value"].pct_change().fillna(0)
+                        asset_rets = pd.DataFrame()
+                        for asset in mix_assets_selected: asset_rets[asset] = df_r[asset].pct_change().fillna(0)
+                        mix_values = [init_spent]
+                        current_val = init_spent
+                        sub_accounts = {}
+                        sub_accounts["BTP"] = current_val * btp_capital_ratio
+                        for asset in mix_assets_selected: sub_accounts[asset] = current_val * risk_capital_ratio * target_weights[asset]
+                        for i in range(1, len(df_r)):
+                            r_btp = btp_ret.iloc[i]
+                            sub_accounts["BTP"] *= (1 + r_btp)
+                            for asset in mix_assets_selected:
+                                r_ass = asset_rets[asset].iloc[i]
+                                sub_accounts[asset] *= (1 + r_ass)
+                            total_nav = sub_accounts["BTP"] + sum(sub_accounts[a] for a in mix_assets_selected)
+                            curr_btp_w = sub_accounts["BTP"] / total_nav
+                            if abs(curr_btp_w - btp_capital_ratio) > 0.05:
+                                sub_accounts["BTP"] = total_nav * btp_capital_ratio
+                                for asset in mix_assets_selected: sub_accounts[asset] = total_nav * risk_capital_ratio * target_weights[asset]
+                            mix_values.append(total_nav)
+                        df["Mix_Portfolio"] = mix_values
 
-            # Save state and FLIP FLAG
-            st.session_state.sim_results = {'df': df, 'init_spent': init_spent, 'maturity_date': calc_maturity, 'selected_benchmarks': selected_benchmarks, 'inflation': inflation, 'has_mix': bool(mix_assets_selected), 'mix_details': mix_weights if mix_assets_selected else {}, 'btp_w_final': btp_weight if mix_assets_selected else 100, 'sim_mode': sim_mode, 'n_sims': n_sims, 'data_period': data_period_option, 'bond_df': bond_df, 'tax_log': tax_log_res, 'total_risk_weight': total_risk_weight if mix_assets_selected else 0, 'tax_rate_input': tax_rate}
-            st.session_state.simulation_done = True
-            st.rerun()
+                # ACTUAL INVESTED SUM CALCULATION
+                risk_cash_calculated = total_budget_input * (total_risk_weight / 100.0)
+                total_actual_invested = final_btp_sum + risk_cash_calculated
+                
+                if total_actual_invested > 0:
+                    true_btp_pct = (final_btp_sum / total_actual_invested) * 100
+                    true_risk_pct = (risk_cash_calculated / total_actual_invested) * 100
+                else:
+                    true_btp_pct = 0
+                    true_risk_pct = 0
+                
+                st.session_state.sim_results = {
+                    'df': df, 
+                    'init_spent': total_actual_invested, 
+                    'maturity_date': calc_maturity, 
+                    'selected_benchmarks': selected_benchmarks, 
+                    'inflation': inflation, 
+                    'has_mix': bool(mix_assets_selected), 
+                    'mix_details': mix_weights if mix_assets_selected else {}, 
+                    'btp_w_final': btp_weight if mix_assets_selected else 100, 
+                    'sim_mode': sim_mode, 
+                    'n_sims': n_sims, 
+                    'data_period': data_period_option, 
+                    'bond_df': bond_df, 
+                    'tax_log': tax_log_res, 
+                    'total_risk_weight': total_risk_weight if mix_assets_selected else 0, 
+                    'tax_rate_input': tax_rate, 
+                    'base_btp_capital': final_btp_sum,
+                    'true_btp_pct': true_btp_pct,
+                    'true_risk_pct': true_risk_pct
+                }
+                st.session_state.simulation_done = True
+                
+                # JS SCROLL TO TOP
+                components.html(f"""
+                    <script>
+                        window.parent.document.body.scrollTop = 0;
+                        window.parent.document.documentElement.scrollTop = 0;
+                        var main = window.parent.document.querySelector(".main");
+                        if (main) main.scrollTop = 0;
+                    </script>
+                """, height=0)
+                
+                st.rerun()
 
 # --- RESULTS SECTION (Visible if done) ---
 if st.session_state.simulation_done and 'sim_results' in st.session_state:
@@ -759,6 +859,32 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     init_spent = res['init_spent']
     inflation = res['inflation']
     tax_rate_used = res['tax_rate_input']
+    base_btp_cap = res.get('base_btp_capital', init_spent)
+    
+    # NEW DASHBOARD SUMMARY CARD - HTML MULTI-ASSET LOGIC
+    btp_share = res.get('true_btp_pct', 100)
+    
+    # Build dynamic bars HTML - WITH HEIGHT FIX
+    mix_details = res.get('mix_details', {})
+    
+    # Fixed height style to ensure visibility
+    bars_html = f'<div style="width: {btp_share}%; background-color: #10b981; height: 100%;" title="BTP ({btp_share:.1f}%)"></div>'
+    legend_html = f'<div class="leg-item-flex"><div class="dot" style="background-color: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5);"></div> BTP ({btp_share:.1f}%)</div>'
+    
+    if res.get('has_mix'):
+        total_risk_input = res['total_risk_weight']
+        for asset, weight_input in mix_details.items():
+            if total_risk_input > 0:
+                asset_real_share = (weight_input / total_risk_input) * res['true_risk_pct']
+                color = ASSET_CONFIG[asset]['color']
+                # Added height: 100% explicitly
+                bars_html += f'<div style="width: {asset_real_share}%; background-color: {color}; height: 100%;" title="{asset} ({asset_real_share:.1f}%)"></div>'
+                legend_html += f'<div class="leg-item-flex"><div class="dot" style="background-color: {color}; box-shadow: 0 0 8px {color}66;"></div> {asset.split()[0]} ({asset_real_share:.1f}%)</div>'
+    
+    # Formatted without indent to avoid markdown code block interpretation
+    dashboard_html = f"""<div class="dash-container"><div class="dash-header-row"><span class="dash-label">Investimento Totale</span></div><div class="dash-value">€ {init_spent:,.0f}</div><div class="progress-track">{bars_html}</div><div class="dash-legend-flex">{legend_html}</div></div>"""
+    
+    st.markdown(dashboard_html, unsafe_allow_html=True)
     
     st.markdown("### 📊 Risultati Simulazione")
     
@@ -769,14 +895,13 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     tax_log = res.get('tax_log', {})
     total_tax = tax_log.get('btp_coupons', 0) + tax_log.get('btp_gain', 0) + tax_log.get('asset_gain', 0)
     
-    # NEW: Average Monthly Coupon Calculation
     total_coupons_net = df["Cum_Coupons"].iloc[-1]
     n_months = len(df)
     avg_monthly_coupon = total_coupons_net / n_months if n_months > 0 else 0
     
     real_val = final_mix / ((1+inflation)**((len(df))/12))
     
-    gain_btp = final_btp_100 - init_spent
+    gain_btp = final_btp_100 - base_btp_cap
     gain_mix = final_mix - init_spent
     
     c1, c2, c3, c4 = st.columns(4)
@@ -808,7 +933,7 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     fig.update_layout(title="Evoluzione Capitale (Scenario Mediano)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=500, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ ", type="log" if use_log else "linear"), hovermode="x unified", legend=dict(orientation="h", y=1.02, x=1, xanchor="right"))
     st.plotly_chart(fig, use_container_width=True)
     
-    # 3. TAX REPORT SECTION (MOVED DOWN)
+    # 3. TAX REPORT SECTION
     st.markdown("---")
     st.subheader("📊 Report Fiscale e Impatto Tasse")
     
@@ -824,6 +949,8 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     total_risk_tax_series = pd.Series(0.0, index=df_chart.index)
     if res.get('has_mix'):
         mix_weights = res['mix_details']
+        total_invested_real = init_spent # 50k
+        
         for asset, weight in mix_weights.items():
             if asset in df_chart.columns:
                 asset_net_series = df_chart[asset]
@@ -834,6 +961,7 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
                 total_risk_tax_series += weighted_asset_tax
     
     total_tax_wedge = btp_tax_curve + total_risk_tax_series
+    
     net_curve_col = "Mix_Portfolio" if "Mix_Portfolio" in df_chart.columns else "BTP_Value"
     net_curve = df_chart[net_curve_col]
     gross_curve = net_curve + total_tax_wedge
