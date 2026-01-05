@@ -30,7 +30,7 @@ st.markdown("""
     }
     h1, h2, h3, h4 { color: #f4f4f5; font-weight: 600; letter-spacing: -0.5px; }
     
-    /* INPUT WIDGETS STANDARD */
+    /* INPUT WIDGETS */
     .stTextInput > div > div > input, 
     .stNumberInput > div > div > input, 
     .stDateInput > div > div > input, 
@@ -63,7 +63,7 @@ st.markdown("""
     .text-green { color: #34d399; }
     .text-purple { color: #a78bfa; }
     
-    /* INPUT HERO CUSTOMIZATION (FONT SIZE FIX) */
+    /* INPUT HERO CUSTOMIZATION */
     div[data-testid="stNumberInput"] input {
         border: none !important;
         background: transparent !important;
@@ -89,39 +89,24 @@ st.markdown("""
     .dash-label { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
     .dash-value { font-size: 2.5rem; font-weight: 800; color: #fff; text-align: center; margin-bottom: 15px; }
     
-    /* PROGRESS BAR CONTAINER */
     .progress-track {
-        width: 100%; 
-        height: 16px; 
-        background-color: #334155; 
-        border-radius: 8px; 
-        overflow: hidden; 
-        display: flex;
+        width: 100%; height: 16px; background-color: #334155; border-radius: 8px; overflow: hidden; display: flex;
     }
     
-    /* LEGEND CONTAINER */
     .dash-legend-flex {
-        display: flex; 
-        flex-wrap: wrap; 
-        justify-content: center; 
-        gap: 15px; 
-        margin-top: 15px; 
-        font-size: 0.9rem; 
-        font-weight: 500; 
-        color: #d4d4d8;
+        display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin-top: 15px; font-size: 0.9rem; font-weight: 500; color: #d4d4d8;
     }
     .leg-item-flex { display: flex; align-items: center; gap: 6px; }
 
-    /* --- METRICS (ROUNDED STYLE RESTORED) --- */
+    /* --- METRICS --- */
     div[data-testid="stMetric"] {
         background-color: #18181b;
         border: 1px solid #27272a;
-        border-radius: 16px !important; 
+        border-radius: 16px !important;
         padding: 15px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     div[data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 700 !important; }
-    
     div[data-testid="stMetricDelta"] {
         background-color: rgba(34, 197, 94, 0.15);
         border-radius: 6px;
@@ -168,8 +153,7 @@ def load_market_data(period_str):
     tickers_map = {v["ticker"]: k for k, v in ASSET_CONFIG.items()}
     tickers_list = list(tickers_map.keys())
     final_df = pd.DataFrame()
-    data_source = "Yahoo Finance (Live)"
-
+    
     # Fallback Data
     BACKUP_DATA = {
         "S&P 500 🇺🇸": [-0.06, -0.03, -0.01, 0.04, 0.01, -0.08, -0.01, 0.09, -0.09, -0.16, 0.05, 0.02, 0.03, 0.01, -0.01, 0.04],
@@ -669,7 +653,6 @@ if not st.session_state.simulation_done:
     
     # Generate INIT data based on num_btp
     bonds_init_data = []
-    # Example logic: Repeat the 2 defaults cycling if > 2, or just use defaults
     defaults = [
         {"Nome/ISIN": "IT0005425233", "Scadenza": date(2051, 9, 1), "Cedola %": 1.70, "Prezzo": 59.75},
         {"Nome/ISIN": "IT0005441883", "Scadenza": date(2072, 3, 1), "Cedola %": 2.15, "Prezzo": 58.32}
@@ -864,7 +847,7 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     # NEW DASHBOARD SUMMARY CARD - HTML MULTI-ASSET LOGIC
     btp_share = res.get('true_btp_pct', 100)
     
-    # Build dynamic bars HTML - WITH HEIGHT FIX
+    # Build dynamic bars HTML
     mix_details = res.get('mix_details', {})
     
     # Fixed height style to ensure visibility
@@ -933,7 +916,7 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     fig.update_layout(title="Evoluzione Capitale (Scenario Mediano)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=500, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ ", type="log" if use_log else "linear"), hovermode="x unified", legend=dict(orientation="h", y=1.02, x=1, xanchor="right"))
     st.plotly_chart(fig, use_container_width=True)
     
-    # 3. TAX REPORT SECTION
+    # 3. TAX REPORT SECTION (MOVED DOWN)
     st.markdown("---")
     st.subheader("📊 Report Fiscale e Impatto Tasse")
     
