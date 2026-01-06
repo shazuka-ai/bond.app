@@ -45,7 +45,7 @@ st.markdown("""
         background-color: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 8px;
     }
 
-    /* --- HERO CARDS (INPUTS) --- */
+    /* --- HERO CARDS --- */
     .prof-card {
         background-color: #131316;
         border: 1px solid #27272a;
@@ -56,18 +56,20 @@ st.markdown("""
     }
     .accent-green { border-top: 3px solid #10b981; }
     .accent-purple { border-top: 3px solid #8b5cf6; }
+    .accent-blue { border-top: 3px solid #3b82f6; }
     
     .card-label {
         font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 5px; display: block; text-align: center;
     }
     .text-green { color: #34d399; }
     .text-purple { color: #a78bfa; }
+    .text-blue { color: #60a5fa; }
     
     /* INPUT HERO CUSTOMIZATION */
     div[data-testid="stNumberInput"] input {
         border: none !important;
         background: transparent !important;
-        font-size: 1.3rem !important; 
+        font-size: 1.3rem !important;
         font-weight: 700 !important;
         color: white !important;
         text-align: center !important;
@@ -75,7 +77,7 @@ st.markdown("""
     }
     div[data-testid="stNumberInput"] button { display: none; } 
 
-    /* --- SUMMARY DASHBOARD (RESULT) --- */
+    /* --- SUMMARY DASHBOARD --- */
     .dash-container {
         background: linear-gradient(145deg, #1e293b, #0f172a);
         border: 1px solid #334155;
@@ -113,6 +115,19 @@ st.markdown("""
         padding: 2px 8px;
         width: fit-content;
         margin-top: 4px;
+    }
+    
+    /* SINGLE ASSET BADGE */
+    .single-asset-badge {
+        background-color: rgba(139, 92, 246, 0.1);
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+        color: #d8b4fe;
+        font-weight: 600;
+        font-size: 1rem;
+        margin-top: 10px;
     }
 
     /* UTILS */
@@ -153,7 +168,8 @@ def load_market_data(period_str):
     tickers_map = {v["ticker"]: k for k, v in ASSET_CONFIG.items()}
     tickers_list = list(tickers_map.keys())
     final_df = pd.DataFrame()
-    
+    data_source = "Yahoo Finance (Live)"
+
     # Fallback Data
     BACKUP_DATA = {
         "S&P 500 🇺🇸": [-0.06, -0.03, -0.01, 0.04, 0.01, -0.08, -0.01, 0.09, -0.09, -0.16, 0.05, 0.02, 0.03, 0.01, -0.01, 0.04],
@@ -320,8 +336,9 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
         except Exception:
             continue
             
-    if not bonds:
-        return None, "Nessun BTP valido inserito.", 0, today, tax_log
+    # CRITICAL FIX: Allow 0 bonds if using only Risk Assets (Mix)
+    if not bonds and (mix_weights is None or len(mix_weights) == 0):
+        return None, "Nessun BTP valido e nessun Asset Satellite inserito.", 0, today, tax_log
 
     total_cash_invested = sum([b['invested'] for b in bonds])
     
@@ -419,7 +436,7 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
                             hist_idx = i % len(hist_series)
                             returns_to_use[i] = hist_series[hist_idx]
                     
-                    gross_values = [total_cash_invested]
+                    gross_values = [1.0]
                     for i in range(len(df)):
                         monthly_return = returns_to_use[i]
                         prev_val = gross_values[-1]
@@ -427,22 +444,7 @@ def calculate_engine_multibond(bond_df, capital_override, tax_rate, use_compound
                         gross_values.append(new_val)
                     gross_values = np.array(gross_values[1:])
                     
-                    # --- WEIGHTED TAX LOGIC ---
-                    if mix_weights and name in mix_weights:
-                        weight_pct = mix_weights[name] / 100.0
-                        weighted_capital = total_cash_invested * weight_pct
-                        growth_factor = gross_values[-1] / total_cash_invested
-                        final_val_weighted = weighted_capital * growth_factor
-                        gain_weighted = final_val_weighted - weighted_capital
-                        
-                        if gain_weighted > 0:
-                            tax_log['asset_gain'] += (gain_weighted * asset_tax_rate)
-                            
-                    # Chart Data (Net)
-                    gains = gross_values - total_cash_invested
-                    taxes = np.where(gains > 0, gains * asset_tax_rate, 0)
-                    net_values = gross_values - taxes
-                    df[name] = net_values
+                    df[name] = gross_values
 
     return df, None, total_cash_invested, max_maturity, tax_log
 
@@ -612,27 +614,53 @@ if not st.session_state.simulation_done:
 
     with c_in_2:
         # VISUALLY INTEGRATED CONTAINER FOR MIX (PRO BOX)
-        st.markdown('<div class="prof-card accent-purple"><span class="card-label text-purple">🚀 Portafoglio Misto</span>', unsafe_allow_html=True)
-        mix_assets_selected = st.multiselect("Asset Satellite", list(ASSET_CONFIG.keys()), placeholder="Seleziona asset...", label_visibility="collapsed")
+        st.markdown('<div class="prof-card accent-purple"><span class="card-label text-purple">🚀 Strategia Portafoglio</span>', unsafe_allow_html=True)
+        # SELECTOR FOR STRATEGY TYPE
+        portfolio_type = st.radio("Tipo Allocazione:", ["Bilanciato (BTP + Asset)", "Speculativo (Solo Asset)"], label_visibility="collapsed")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # PERCENTAGE INPUTS
+    # Logic based on portfolio type
+    use_btp = (portfolio_type == "Bilanciato (BTP + Asset)")
+    
+    # MIX SECTION
+    st.markdown('<div class="prof-card accent-blue"><span class="card-label text-blue">📡 Selezione Asset Satellite (Rischio)</span>', unsafe_allow_html=True)
+    mix_assets_selected = st.multiselect("Asset Satellite", list(ASSET_CONFIG.keys()), placeholder="Seleziona asset...", label_visibility="collapsed")
+    
     mix_weights = {}
     total_risk_weight = 0
     valid_mix = True
-    btp_weight = 100.0
+    btp_weight = 100.0 if use_btp else 0.0
     
     if mix_assets_selected:
+        st.markdown("<br>", unsafe_allow_html=True)
         cols_mix = st.columns(len(mix_assets_selected))
+        
+        # LOGIC FOR AUTO-100% IF SINGLE ASSET & SPECULATIVE
+        auto_100_single = (not use_btp and len(mix_assets_selected) == 1)
+        
         for idx, asset in enumerate(mix_assets_selected):
             with cols_mix[idx]:
                 k = f"w_{asset}"
                 if k not in st.session_state: st.session_state[k] = 20.0 
-                st.markdown(f"<div style='text-align:center; font-weight:bold; color:#a78bfa; margin-bottom:5px;'>% {asset.split()[0]}</div>", unsafe_allow_html=True)
-                w = st.number_input(f"Peso {asset}", 0.0, 100.0, step=0.5, format="%.1f", key=k, label_visibility="collapsed")
-                mix_weights[asset] = w
-                total_risk_weight += w
-        
+                
+                # If NOT auto-100%, show the percentage label above input
+                if not auto_100_single:
+                     st.markdown(f"<div style='text-align:center; font-weight:bold; color:#a78bfa; margin-bottom:5px;'>% {asset.split()[0]}</div>", unsafe_allow_html=True)
+                
+                if auto_100_single:
+                    # CLEAN: SHOW BADGE ONLY
+                    st.markdown(f"<div class='single-asset-badge'>100% Allocato su {asset}</div>", unsafe_allow_html=True)
+                    mix_weights[asset] = 100.0
+                    total_risk_weight += 100.0
+                else:
+                    # Normal input
+                    w = st.number_input(f"Peso {asset}", 0.0, 100.0, step=0.5, format="%.1f", key=k, label_visibility="collapsed")
+                    mix_weights[asset] = w
+                    total_risk_weight += w
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Validation
+    if use_btp:
         btp_weight = 100 - total_risk_weight
         if btp_weight < 0:
             st.error(f"Errore: Allocazione totale > 100%. Riduci i pesi degli asset satellite.")
@@ -640,53 +668,80 @@ if not st.session_state.simulation_done:
         else:
             st.info(f"📊 Allocazione Finale: {btp_weight:.1f}% BTP Sicuri + {total_risk_weight:.1f}% Asset Rischiosi")
             valid_mix = True
+    else:
+        # Speculative mode: Risk must sum to 100
+        if abs(total_risk_weight - 100.0) > 0.1:
+             st.warning(f"⚠️ Attenzione: In modalità speculativa il totale deve fare 100%. Attuale: {total_risk_weight:.1f}%")
+             valid_mix = False 
+        else:
+             st.success(f"🔥 Portafoglio 100% Speculativo Attivo.")
+             valid_mix = True
+             btp_weight = 0.0
 
-    # --- 2. CORE PORTFOLIO (BTP) ---
-    st.markdown('<div class="step-header">2. Dettaglio BTP (Core)</div>', unsafe_allow_html=True)
+    # --- 2. CORE PORTFOLIO (BTP) - ONLY IF ENABLED ---
     
-    # PRE-FILTER: ASK FOR NUMBER OF BTPs
-    num_btp = st.number_input("Numero di BTP nel portafoglio:", min_value=1, max_value=10, value=2, step=1)
+    bond_df = pd.DataFrame()
     
-    # AUTO-DISTRIBUTION LOGIC
-    btp_capital_available = total_budget_input * (btp_weight / 100.0)
-    capital_per_bond = btp_capital_available / num_btp if num_btp > 0 else 0
-    
-    # Generate INIT data based on num_btp
-    bonds_init_data = []
-    defaults = [
-        {"Nome/ISIN": "IT0005425233", "Scadenza": date(2051, 9, 1), "Cedola %": 1.70, "Prezzo": 59.75},
-        {"Nome/ISIN": "IT0005441883", "Scadenza": date(2072, 3, 1), "Cedola %": 2.15, "Prezzo": 58.32}
-    ]
-    
-    for i in range(num_btp):
-        ref = defaults[i % 2]
-        b = ref.copy()
-        b["Capitale Investito (€)"] = capital_per_bond
-        bonds_init_data.append(b)
+    if use_btp:
+        st.markdown('<div class="step-header">2. Dettaglio BTP (Core)</div>', unsafe_allow_html=True)
+        
+        # PRE-FILTER: ASK FOR NUMBER OF BTPs
+        num_btp = st.number_input("Numero di BTP nel portafoglio:", min_value=1, max_value=10, value=2, step=1)
+        
+        # AUTO-DISTRIBUTION LOGIC
+        btp_capital_available = total_budget_input * (btp_weight / 100.0)
+        capital_per_bond = btp_capital_available / num_btp if num_btp > 0 else 0
+        
+        bonds_init_data = []
+        defaults = [
+            {"Nome/ISIN": "IT0005425233", "Scadenza": date(2051, 9, 1), "Cedola %": 1.70, "Prezzo": 59.75},
+            {"Nome/ISIN": "IT0005441883", "Scadenza": date(2072, 3, 1), "Cedola %": 2.15, "Prezzo": 58.32}
+        ]
+        
+        for i in range(num_btp):
+            ref = defaults[i % 2]
+            b = ref.copy()
+            b["Capitale Investito (€)"] = capital_per_bond
+            bonds_init_data.append(b)
 
-    bond_df = st.data_editor(
-        pd.DataFrame(bonds_init_data),
-        num_rows="fixed", # FIXED ROWS TO PREVENT ADD/DELETE CONFLICTS
-        column_config={
-            "Scadenza": st.column_config.DateColumn("Scadenza", format="DD/MM/YYYY"),
-            "Cedola %": st.column_config.NumberColumn("Cedola %", min_value=0.0, max_value=15.0, step=0.05, format="%.2f%%"),
-            "Prezzo": st.column_config.NumberColumn("Prezzo Acquisto", min_value=0.0, max_value=200.0, step=0.01, format="%.2f"),
-            "Capitale Investito (€)": st.column_config.NumberColumn("Capitale Investito (Cash)", min_value=0.0, step=1000.0, format="€ %.2f")
-        },
-        use_container_width=True,
-        key=f"editor_{total_budget_input}_{btp_weight}_{num_btp}"
-    )
-    
-    current_btp_sum = bond_df["Capitale Investito (€)"].sum()
-    implied_nominal = (bond_df["Capitale Investito (€)"] / (bond_df["Prezzo"] / 100)).sum()
-    
-    c_k1, c_k2, c_k3 = st.columns(3)
-    with c_k1:
-        st.markdown(f"**Capitale BTP Effettivo:** :green[€ {current_btp_sum:,.0f}]")
-    with c_k2:
-        st.markdown(f"**Valore Nominale a Scadenza:** € {implied_nominal:,.0f}")
-    with c_k3:
-        compound = st.toggle("Reinvesti Cedole (Interesse Composto)", value=False, help="Se attivo, le cedole non vengono incassate ma reinvestite automaticamente allo stesso tasso, generando interesse su interesse.")
+        bond_df = st.data_editor(
+            pd.DataFrame(bonds_init_data),
+            num_rows="fixed", 
+            column_config={
+                "Scadenza": st.column_config.DateColumn("Scadenza", format="DD/MM/YYYY"),
+                "Cedola %": st.column_config.NumberColumn("Cedola %", min_value=0.0, max_value=15.0, step=0.05, format="%.2f%%"),
+                "Prezzo": st.column_config.NumberColumn("Prezzo Acquisto", min_value=0.0, max_value=200.0, step=0.01, format="%.2f"),
+                "Capitale Investito (€)": st.column_config.NumberColumn("Capitale Investito (Cash)", min_value=0.0, step=1000.0, format="€ %.2f")
+            },
+            use_container_width=True,
+            key=f"editor_{total_budget_input}_{btp_weight}_{num_btp}"
+        )
+        
+        current_btp_sum = bond_df["Capitale Investito (€)"].sum()
+        implied_nominal = (bond_df["Capitale Investito (€)"] / (bond_df["Prezzo"] / 100)).sum()
+        
+        c_k1, c_k2, c_k3 = st.columns(3)
+        with c_k1:
+            st.markdown(f"**Capitale BTP Effettivo:** :green[€ {current_btp_sum:,.0f}]")
+        with c_k2:
+            st.markdown(f"**Valore Nominale a Scadenza:** € {implied_nominal:,.0f}")
+        with c_k3:
+            compound = st.toggle("Reinvesti Cedole (Interesse Composto)", value=False)
+    else:
+        # SPECULATIVE MODE: TIME HORIZON SLIDER
+        st.markdown('<div class="step-header">2. Orizzonte Temporale (Speculativo)</div>', unsafe_allow_html=True)
+        years_horizon = st.slider("Durata Simulazione (Anni)", 1, 50, 10, help="Senza BTP a scadenza fissa, definisci tu la durata della simulazione.")
+        
+        target_date = date.today().replace(year=date.today().year + years_horizon)
+        dummy_bond = {
+            "Nome/ISIN": "Orizzonte Temporale",
+            "Scadenza": target_date,
+            "Cedola %": 0.0,
+            "Prezzo": 100.0,
+            "Capitale Investito (€)": 0.0
+        }
+        bond_df = pd.DataFrame([dummy_bond])
+        compound = False
 
     # --- 3. PARAMETRI ECONOMICI ---
     st.markdown('<div class="step-header">3. Fisco & Inflazione</div>', unsafe_allow_html=True)
@@ -718,9 +773,8 @@ if not st.session_state.simulation_done:
             else: 
                 st.info("💡 Cloud Safe.")
 
-    # --- ADVANCED ANALYSIS (Optional Expander) ---
+    # --- ADVANCED ANALYSIS ---
     with st.expander("🛠️ Strumenti di Analisi Avanzata (Opzionale)"):
-        st.caption("Configura qui i benchmark di confronto e le finestre di analisi statistica.")
         c_a1, c_a2 = st.columns(2)
         with c_a1:
             selected_benchmarks = st.multiselect("Confronta con (Benchmark):", list(ASSET_CONFIG.keys()), default=[], help="Scegli uno o più indici di mercato per visualizzare la loro linea di andamento sul grafico finale insieme al tuo portafoglio.")
@@ -738,7 +792,7 @@ if not st.session_state.simulation_done:
             st.error("Correggi l'allocazione del portafoglio (Totale > 100%) prima di avviare.")
         else:
             # FIX: RECALCULATE BTP TOTAL FROM TABLE JUST IN CASE
-            final_btp_sum = bond_df["Capitale Investito (€)"].sum()
+            final_btp_sum = bond_df["Capitale Investito (€)"].sum() if use_btp else 0.0
             
             # PERFORM CALCULATION
             all_assets = list(set(selected_benchmarks + (mix_assets_selected if mix_assets_selected else [])))
@@ -751,47 +805,38 @@ if not st.session_state.simulation_done:
                 
                 # Post-process mix
                 if mix_assets_selected:
-                    risk_total_w = sum(mix_weights.values())
-                    target_weights = {a: (w/risk_total_w) for a, w in mix_weights.items()} 
-                    risk_capital_ratio = (100 - btp_weight) / 100.0
-                    btp_capital_ratio = btp_weight / 100.0
-                    if not rebalance:
-                        df["Mix_Portfolio"] = df["BTP_Value"] * btp_capital_ratio
-                        for asset, w_norm in target_weights.items():
+                    if not use_btp:
+                        # PURE SPECULATIVE MODE
+                        df["Mix_Portfolio"] = 0.0
+                        for asset, w_norm in mix_weights.items():
                             if asset in df.columns:
-                                quota = risk_capital_ratio * w_norm
-                                df["Mix_Portfolio"] += df[asset] * quota
+                                # Normalised curve (starts at 1.0)
+                                curve = df[asset] 
+                                # Actual cash
+                                cash = total_budget_input * (w_norm / 100.0)
+                                df["Mix_Portfolio"] += curve * cash
                     else:
-                        df_r = df
-                        btp_ret = df_r["BTP_Value"].pct_change().fillna(0)
-                        asset_rets = pd.DataFrame()
-                        for asset in mix_assets_selected: asset_rets[asset] = df_r[asset].pct_change().fillna(0)
-                        mix_values = [init_spent]
-                        current_val = init_spent
-                        sub_accounts = {}
-                        sub_accounts["BTP"] = current_val * btp_capital_ratio
-                        for asset in mix_assets_selected: sub_accounts[asset] = current_val * risk_capital_ratio * target_weights[asset]
-                        for i in range(1, len(df_r)):
-                            r_btp = btp_ret.iloc[i]
-                            sub_accounts["BTP"] *= (1 + r_btp)
-                            for asset in mix_assets_selected:
-                                r_ass = asset_rets[asset].iloc[i]
-                                sub_accounts[asset] *= (1 + r_ass)
-                            total_nav = sub_accounts["BTP"] + sum(sub_accounts[a] for a in mix_assets_selected)
-                            curr_btp_w = sub_accounts["BTP"] / total_nav
-                            if abs(curr_btp_w - btp_capital_ratio) > 0.05:
-                                sub_accounts["BTP"] = total_nav * btp_capital_ratio
-                                for asset in mix_assets_selected: sub_accounts[asset] = total_nav * risk_capital_ratio * target_weights[asset]
-                            mix_values.append(total_nav)
-                        df["Mix_Portfolio"] = mix_values
+                        # BALANCED MODE
+                        df["Mix_Portfolio"] = df["BTP_Value"] # Start with BTP curve (absolute)
+                        
+                        for asset, w_norm in mix_weights.items():
+                            if asset in df.columns:
+                                curve = df[asset]
+                                cash = total_budget_input * (w_norm / 100.0)
+                                asset_val = curve * cash
+                                df["Mix_Portfolio"] += asset_val
 
                 # ACTUAL INVESTED SUM CALCULATION
-                risk_cash_calculated = total_budget_input * (total_risk_weight / 100.0)
-                total_actual_invested = final_btp_sum + risk_cash_calculated
+                if use_btp:
+                    risk_cash_calculated = total_budget_input * (total_risk_weight / 100.0)
+                    total_actual_invested = final_btp_sum + risk_cash_calculated
+                else:
+                    total_actual_invested = total_budget_input
                 
+                # Percentages for summary
                 if total_actual_invested > 0:
                     true_btp_pct = (final_btp_sum / total_actual_invested) * 100
-                    true_risk_pct = (risk_cash_calculated / total_actual_invested) * 100
+                    true_risk_pct = 100 - true_btp_pct
                 else:
                     true_btp_pct = 0
                     true_risk_pct = 0
@@ -846,25 +891,27 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     
     # NEW DASHBOARD SUMMARY CARD - HTML MULTI-ASSET LOGIC
     btp_share = res.get('true_btp_pct', 100)
-    
-    # Build dynamic bars HTML
     mix_details = res.get('mix_details', {})
     
     # Fixed height style to ensure visibility
-    bars_html = f'<div style="width: {btp_share}%; background-color: #10b981; height: 100%;" title="BTP ({btp_share:.1f}%)"></div>'
-    legend_html = f'<div class="leg-item-flex"><div class="dot" style="background-color: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5);"></div> BTP ({btp_share:.1f}%)</div>'
+    bars_html = ""
+    legend_html = ""
     
+    # BTP Part
+    if btp_share > 0.1:
+        bars_html += f'<div style="width: {btp_share}%; background-color: #10b981; height: 100%;" title="BTP ({btp_share:.1f}%)"></div>'
+        legend_html += f'<div class="leg-item-flex"><div class="dot" style="background-color: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5);"></div> BTP ({btp_share:.1f}%)</div>'
+    
+    # Mix Part
     if res.get('has_mix'):
         total_risk_input = res['total_risk_weight']
         for asset, weight_input in mix_details.items():
             if total_risk_input > 0:
                 asset_real_share = (weight_input / total_risk_input) * res['true_risk_pct']
                 color = ASSET_CONFIG[asset]['color']
-                # Added height: 100% explicitly
                 bars_html += f'<div style="width: {asset_real_share}%; background-color: {color}; height: 100%;" title="{asset} ({asset_real_share:.1f}%)"></div>'
                 legend_html += f'<div class="leg-item-flex"><div class="dot" style="background-color: {color}; box-shadow: 0 0 8px {color}66;"></div> {asset.split()[0]} ({asset_real_share:.1f}%)</div>'
     
-    # Formatted without indent to avoid markdown code block interpretation
     dashboard_html = f"""<div class="dash-container"><div class="dash-header-row"><span class="dash-label">Investimento Totale</span></div><div class="dash-value">€ {init_spent:,.0f}</div><div class="progress-track">{bars_html}</div><div class="dash-legend-flex">{legend_html}</div></div>"""
     
     st.markdown(dashboard_html, unsafe_allow_html=True)
@@ -873,10 +920,35 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     
     # 1. METRICS
     final_btp_100 = df["BTP_Value"].iloc[-1]
-    final_mix = df["Mix_Portfolio"].iloc[-1] if "Mix_Portfolio" in df.columns else final_btp_100
     
+    # Handle Pure Speculative Case for Metrics
+    if "Mix_Portfolio" in df.columns:
+        final_mix = df["Mix_Portfolio"].iloc[-1]
+    else:
+        final_mix = final_btp_100 
+        
     tax_log = res.get('tax_log', {})
-    total_tax = tax_log.get('btp_coupons', 0) + tax_log.get('btp_gain', 0) + tax_log.get('asset_gain', 0)
+    
+    # --- TAX FIX: COMBINED CALCULATION ---
+    # Standard BTP taxes (coupons + gain)
+    tax_btp_part = tax_log.get('btp_coupons', 0) + tax_log.get('btp_gain', 0)
+    
+    # Risk Asset Tax Calculation (Post-Processing)
+    tax_risk_part = 0.0
+    if res.get('has_mix'):
+        # Calculate Risk Portion Value Gain
+        # Risk Final Value = Total Final Mix - Final BTP Value
+        final_risk_value = final_mix - final_btp_100
+        
+        # Risk Initial Capital = Total Init - BTP Init
+        init_risk_capital = init_spent - base_btp_cap
+        
+        risk_gain = final_risk_value - init_risk_capital
+        if risk_gain > 0:
+            tax_risk_part = risk_gain * 0.26
+            
+    total_tax = tax_btp_part + tax_risk_part
+    # -------------------------------------
     
     total_coupons_net = df["Cum_Coupons"].iloc[-1]
     n_months = len(df)
@@ -900,63 +972,69 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     use_log = st.toggle("Scala Logaritmica", value=False)
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["BTP_Value"], mode='lines', name="Tuo BTP (100%)", line=dict(color="#22c55e", width=3), fill='tozeroy', fillcolor='rgba(34, 197, 94, 0.1)'))
+    if base_btp_cap > 0:
+        fig.add_trace(go.Scatter(x=df["Date"], y=df["BTP_Value"], mode='lines', name="Tuo BTP (100%)", line=dict(color="#22c55e", width=3), fill='tozeroy', fillcolor='rgba(34, 197, 94, 0.1)'))
     
     if res.get('has_mix') and "Mix_Portfolio" in df.columns: 
         fig.add_trace(go.Scatter(x=df["Date"], y=df["Mix_Portfolio"], mode='lines', name="Portafoglio Misto", line=dict(color="#c084fc", width=4)))
         
-    active_curve = df["Mix_Portfolio"] if (res.get('has_mix') and "Mix_Portfolio" in df.columns) else df["BTP_Value"]
+    active_curve = df["Mix_Portfolio"] if "Mix_Portfolio" in df.columns else df["BTP_Value"]
     df['Real_Line'] = active_curve * (1 / ((1+inflation)**((df.index)/12)))
     
     fig.add_trace(go.Scatter(x=df["Date"], y=df['Real_Line'], mode='lines', name="Soglia Reale", line=dict(color="#ef4444", width=2, dash='dot')))
     
     for asset in res['selected_benchmarks']:
-        if asset in df.columns: fig.add_trace(go.Scatter(x=df["Date"], y=df[asset], mode='lines', name=asset, line=dict(color=ASSET_CONFIG[asset]["color"], width=1.5), opacity=0.7))
+        if asset in df.columns: 
+            scaled_bench = df[asset] * init_spent
+            fig.add_trace(go.Scatter(x=df["Date"], y=scaled_bench, mode='lines', name=asset, line=dict(color=ASSET_CONFIG[asset]["color"], width=1.5), opacity=0.7))
         
     fig.update_layout(title="Evoluzione Capitale (Scenario Mediano)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=500, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ ", type="log" if use_log else "linear"), hovermode="x unified", legend=dict(orientation="h", y=1.02, x=1, xanchor="right"))
     st.plotly_chart(fig, use_container_width=True)
     
-    # 3. TAX REPORT SECTION (MOVED DOWN)
+    # 3. TAX REPORT SECTION
     st.markdown("---")
     st.subheader("📊 Report Fiscale e Impatto Tasse")
     
-    # Reconstruct Gross for Chart using saved tax_rate
+    # Initialize df_chart UNCONDITIONALLY to fix NameError
     df_chart = df.copy()
-    df_chart['Cum_Tax_Coupons'] = (df_chart['Cum_Coupons'] / (1-tax_rate_used)) - df_chart['Cum_Coupons']
-    df_chart['Monthly_Tax_Gain_BTP'] = (df_chart['Gain_Netto_Finale'] / (1-tax_rate_used)) - df_chart['Gain_Netto_Finale']
-    df_chart['Cum_Tax_Gain_BTP'] = df_chart['Monthly_Tax_Gain_BTP'].cumsum()
     
-    btp_weight_factor = (100 - res.get('total_risk_weight', 0))/100.0 if res.get('has_mix') else 1.0
-    btp_tax_curve = (df_chart['Cum_Tax_Coupons'] + df_chart['Cum_Tax_Gain_BTP']) * btp_weight_factor
+    total_tax_curve = pd.Series(0.0, index=df.index)
     
-    total_risk_tax_series = pd.Series(0.0, index=df_chart.index)
+    if base_btp_cap > 0:
+        btp_tax_c = (df['Cum_Coupons'] / (1-tax_rate_used)) - df['Cum_Coupons']
+        btp_tax_g = (df['Gain_Netto_Finale'] / (1-tax_rate_used)) - df['Gain_Netto_Finale']
+        total_tax_curve += (btp_tax_c + btp_tax_g.cumsum())
+        
     if res.get('has_mix'):
-        mix_weights = res['mix_details']
-        total_invested_real = init_spent # 50k
-        
-        for asset, weight in mix_weights.items():
-            if asset in df_chart.columns:
-                asset_net_series = df_chart[asset]
-                initial_val = asset_net_series.iloc[0]
-                net_gain = asset_net_series - initial_val
-                asset_tax_100 = net_gain.apply(lambda x: (x / (1 - 0.26)) * 0.26 if x > 0 else 0)
-                weighted_asset_tax = asset_tax_100 * (weight / 100.0)
-                total_risk_tax_series += weighted_asset_tax
+        for asset, weight_input in mix_details.items():
+            if asset in df.columns:
+                if base_btp_cap == 0: 
+                     cash = init_spent * (weight_input / 100.0)
+                else: 
+                     cash = init_spent * (weight_input/100.0)
+                gross_asset_val = df[asset] * cash
+                gain = gross_asset_val - cash
+                tax = gain.apply(lambda x: x * 0.26 if x > 0 else 0)
+                total_tax_curve += tax
     
-    total_tax_wedge = btp_tax_curve + total_risk_tax_series
+    # Adjust for charts
+    final_net_curve = active_curve.copy()
+    if res.get('has_mix'):
+         risk_tax_total = pd.Series(0.0, index=df.index)
+         for asset, weight_input in mix_details.items():
+             if asset in df.columns:
+                 cash = init_spent * (weight_input/100.0)
+                 val = df[asset] * cash
+                 gain = val - cash
+                 t = gain.apply(lambda x: x*0.26 if x>0 else 0)
+                 risk_tax_total += t
+         final_net_curve = active_curve - risk_tax_total
     
-    net_curve_col = "Mix_Portfolio" if "Mix_Portfolio" in df_chart.columns else "BTP_Value"
-    net_curve = df_chart[net_curve_col]
-    gross_curve = net_curve + total_tax_wedge
-    
-    tc1, tc2, tc3 = st.columns(3)
-    with tc1: st.markdown(f"**Ritenuta Cedole (12.5%):** € {tax_log.get('btp_coupons', 0):,.2f}")
-    with tc2: st.markdown(f"**Gain BTP (12.5%):** € {tax_log.get('btp_gain', 0):,.2f}")
-    with tc3: st.markdown(f"**Gain Asset Risk (26%):** € {tax_log.get('asset_gain', 0):,.2f}")
-        
+    final_gross_curve = final_net_curve + total_tax_curve
+
     fig_tax = go.Figure()
-    fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=gross_curve, mode='lines', name='Lordo (Senza Tasse)', line=dict(color='#f87171', width=2, dash='dash')))
-    fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=net_curve, mode='lines', name='Netto (In Tasca)', line=dict(color='#34d399', width=2), fill='tonexty', fillcolor='rgba(248, 113, 113, 0.2)'))
+    fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=final_gross_curve, mode='lines', name='Lordo (Senza Tasse)', line=dict(color='#f87171', width=2, dash='dash')))
+    fig_tax.add_trace(go.Scatter(x=df_chart['Date'], y=final_net_curve, mode='lines', name='Netto (In Tasca)', line=dict(color='#34d399', width=2), fill='tonexty', fillcolor='rgba(248, 113, 113, 0.2)'))
     fig_tax.update_layout(title="Il Cuneo Fiscale nel Tempo", height=300, margin=dict(t=30, b=0, l=0, r=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ "))
     st.plotly_chart(fig_tax, use_container_width=True)
 
@@ -965,21 +1043,24 @@ if st.session_state.simulation_done and 'sim_results' in st.session_state:
     with col_dd:
         st.markdown("#### 🌊 Profondità del Rischio (Drawdown)")
         fig_dd = go.Figure()
-        target_col = "Mix_Portfolio" if (res.get('has_mix') and "Mix_Portfolio" in df.columns) else "BTP_Value"
-        fig_dd.add_trace(go.Scatter(x=df["Date"], y=calculate_drawdown(df[target_col]), mode='lines', name="Drawdown Portafoglio", line=dict(color="#c084fc", width=2), fill='tozeroy'))
+        fig_dd.add_trace(go.Scatter(x=df["Date"], y=calculate_drawdown(final_net_curve), mode='lines', name="Drawdown Portafoglio", line=dict(color="#c084fc", width=2), fill='tozeroy'))
         for asset in res['selected_benchmarks']:
             if asset in df.columns: fig_dd.add_trace(go.Scatter(x=df["Date"], y=calculate_drawdown(df[asset]), mode='lines', name=f"DD {asset}", line=dict(color=ASSET_CONFIG[asset]["color"], width=1), opacity=0.7))
         fig_dd.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=350, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickformat=".1%"), hovermode="x unified", margin=dict(t=10, b=10))
         st.plotly_chart(fig_dd, use_container_width=True)
     
     with col_cash:
-        st.markdown("#### 💸 Flusso Cedolare Netto (BTP)")
-        annual_coupons = df.groupby('Anno')['Cum_Coupons'].max().reset_index()
-        annual_coupons['Flusso_Netto'] = annual_coupons['Cum_Coupons'].diff().fillna(annual_coupons['Cum_Coupons'])
-        fig_cash = go.Figure()
-        fig_cash.add_trace(go.Bar(x=annual_coupons['Anno'], y=annual_coupons['Flusso_Netto'], name='Cedole Annuali', marker_color='#10b981', hovertemplate='Anno %{x}<br>Incasso: € %{y:,.2f}'))
-        fig_cash.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=350, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ "), hovermode="x unified", margin=dict(t=10, b=10))
-        st.plotly_chart(fig_cash, use_container_width=True)
+        if base_btp_cap > 0:
+            st.markdown("#### 💸 Flusso Cedolare Netto (BTP)")
+            annual_coupons = df.groupby('Anno')['Cum_Coupons'].max().reset_index()
+            annual_coupons['Flusso_Netto'] = annual_coupons['Cum_Coupons'].diff().fillna(annual_coupons['Cum_Coupons'])
+            fig_cash = go.Figure()
+            fig_cash.add_trace(go.Bar(x=annual_coupons['Anno'], y=annual_coupons['Flusso_Netto'], name='Cedole Annuali', marker_color='#10b981', hovertemplate='Anno %{x}<br>Incasso: € %{y:,.2f}'))
+            fig_cash.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#e4e4e7'), height=350, xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', tickprefix="€ "), hovermode="x unified", margin=dict(t=10, b=10))
+            st.plotly_chart(fig_cash, use_container_width=True)
+        else:
+            st.markdown("#### 💸 Flusso Cedolare")
+            st.info("Nessun BTP nel portafoglio, nessun flusso cedolare garantito.")
     
     # PDF BUTTON
     pdf_bytes = create_pdf_report(res)
